@@ -56,6 +56,10 @@ import (
 	"sync"
 )
 
+var single = flag.Bool("single", false, "allocate one tree in a single goroutine")
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
+var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+
 type Tree struct {
 	Left  *Tree
 	Right *Tree
@@ -106,6 +110,11 @@ func Run(maxDepth int) {
 		outBuff[0] = msg
 		wg.Done()
 	}()
+	if *single {
+		// thepudds: only do a single tree (with only one goroutine)
+		wg.Wait()
+		return
+	}
 
 	// Create a long-lived binary tree of depth maxDepth. Its statistics will be
 	// handled later.
@@ -157,9 +166,6 @@ func Run(maxDepth int) {
 }
 
 func main() {
-	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
-	var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
-
 	flag.Parse()
 
 	if *cpuprofile != "" {
