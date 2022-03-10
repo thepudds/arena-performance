@@ -1,9 +1,14 @@
-// This is unmodified Go #2 binary tree (current fastest Go program) from Benchmarks Game:
+// This is a MODIFIED Go #2 binary tree from the Benchmarks Game:
 //   https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-go-2.html
+//
+// Modifications include:
+//  * adding arenas support
+//  * adding pprof flags along with a -single flag that creates 1 tree in 1 goroutine
 //
 // License is 3-Clause BSD:
 //   https://benchmarksgame-team.pages.debian.net/benchmarksgame/license.html
 //
+// Leaving the following comments as-is from the original Go #2 program:
 // -------------------------------------------------------
 //
 // The Computer Language Benchmarks Game
@@ -46,6 +51,7 @@
 package main
 
 import (
+	"arena"
 	"flag"
 	"fmt"
 	"log"
@@ -75,9 +81,29 @@ func (t *Tree) Count() int {
 }
 
 // Create a complete binary tree of `depth` and return it as a pointer.
-func NewTree(depth int) *Tree {
+func NewTree(depth int, a *arena.Arena) *Tree {
+	// thepudds: alloc via an arena if we have one.
 	if depth > 0 {
-		return &Tree{Left: NewTree(depth - 1), Right: NewTree(depth - 1)}
+		// thepudds: note that for this particular benchmark, it is faster to create the
+		// left and right sub-trees before allocating our own tree node.
+		// Otherwise, we could eliminate a couple of lines here.
+		left := NewTree(depth-1, a)
+		right := NewTree(depth-1, a)
+		treePtr := allocTreeNode(a)
+		treePtr.Left = left
+		treePtr.Right = right
+		return treePtr
+	} else {
+		return allocTreeNode(a)
+	}
+}
+
+// Allocate an empty tree node, using an arena if provided.
+func allocTreeNode(a *arena.Arena) *Tree {
+	if a != nil {
+		var treePtr *Tree
+		a.New(&treePtr)
+		return treePtr
 	} else {
 		return &Tree{}
 	}
@@ -102,7 +128,12 @@ func Run(maxDepth int) {
 	// first position of the outputBuffer with its statistics.
 	wg.Add(1)
 	go func() {
-		tree := NewTree(maxDepth + 1)
+		// thepudds: create a single arena for this single (usually large) tree,
+		// freeing it when we are done with this tree.
+		stretchArena := arena.New()
+		defer stretchArena.Free()
+
+		tree := NewTree(maxDepth+1, stretchArena)
 		msg := fmt.Sprintf("stretch tree of depth %d\t check: %d",
 			maxDepth+1,
 			tree.Count())
@@ -120,8 +151,13 @@ func Run(maxDepth int) {
 	// handled later.
 	var longLivedTree *Tree
 	wg.Add(1)
+	// thepudds: also create a long-lived arena for this long-lived tree,
+	// freeing it when we are done with this function.
+	longLivedArena := arena.New()
+	defer longLivedArena.Free()
+
 	go func() {
-		longLivedTree = NewTree(maxDepth)
+		longLivedTree = NewTree(maxDepth, longLivedArena)
 		wg.Done()
 	}()
 
@@ -137,8 +173,15 @@ func Run(maxDepth int) {
 			for i := 0; i < iterations; i++ {
 				// Create a binary tree of depth and accumulate total counter with its
 				// node count.
-				a := NewTree(depth)
+				// thepudds: also create an arena for this tree. This is too fine-grained,
+				// but will start comparision here. Free the arena inside this loop
+				// when we are done with the tree.
+				treeArena := arena.New()
+
+				a := NewTree(depth, treeArena)
 				acc += a.Count()
+
+				treeArena.Free()
 			}
 			msg := fmt.Sprintf("%d\t trees of depth %d\t check: %d",
 				iterations,
