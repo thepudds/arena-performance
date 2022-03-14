@@ -3,7 +3,11 @@
 //
 // Modifications include:
 //  * adding arenas support
-//  * adding pprof flags along with a -single flag that creates 1 tree in 1 goroutine
+//  * -minalloc flag controls how frequently each worker goroutine calls Free
+//  * -single flag creates 1 tree in 1 goroutine
+//  * -cpuprofile and -memprofile flags for pprof
+//  * default to binary tree depth of 21 if not specified via command line
+//  * slightly modified output
 //
 // License is 3-Clause BSD:
 //   https://benchmarksgame-team.pages.debian.net/benchmarksgame/license.html
@@ -62,7 +66,11 @@ import (
 	"sync"
 )
 
+// minalloc flag controls how frequently each worker goroutine calls Free
+var minAllocMB = flag.Float64("minalloc", 1, "upon completing a tree, a worker goroutine "+
+	"reuses its arena unless the arena has completed more than minalloc `MB` of allocations")
 var single = flag.Bool("single", false, "allocate one tree in a single goroutine")
+
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
 
@@ -134,9 +142,12 @@ func Run(maxDepth int) {
 		defer stretchArena.Free()
 
 		tree := NewTree(maxDepth+1, stretchArena)
-		msg := fmt.Sprintf("stretch tree of depth %d\t check: %d",
+		nodes := tree.Count()
+		msg := fmt.Sprintf("   stretch tree of depth %-8d arenas: %-6d nodes: %-10d MB: %0.1f",
 			maxDepth+1,
-			tree.Count())
+			1,
+			nodes,
+			float64(nodes*16)/(1<<20))
 
 		outBuff[0] = msg
 		wg.Done()
@@ -169,26 +180,38 @@ func Run(maxDepth int) {
 
 		wg.Add(1)
 		go func(depth, iterations, index int) {
-			acc := 0
+			// Create a binary tree of depth and accumulate total counter with its
+			// node count.
+
+			// thepudds: Also create an arena for the binary tree allocations for this goroutine.
+			// We reuse each arena until it has allocated more than minAllocMB.
+			treeArena := arena.New()
+			arenaCount := 1
+			allocated := 0
+
+			nodes := 0
 			for i := 0; i < iterations; i++ {
-				// Create a binary tree of depth and accumulate total counter with its
-				// node count.
-				// thepudds: also create an arena for this tree. This is too fine-grained,
-				// but will start comparision here. Free the arena inside this loop
-				// when we are done with the tree.
-				treeArena := arena.New()
-
-				a := NewTree(depth, treeArena)
-				acc += a.Count()
-
-				treeArena.Free()
+				if allocated > int(*minAllocMB*(1<<20)) {
+					treeArena.Free()
+					treeArena = arena.New()
+					arenaCount++
+					allocated = 0
+				}
+				tree := NewTree(depth, treeArena)
+				newNodes := tree.Count()
+				nodes += newNodes
+				allocated += newNodes * 16
 			}
-			msg := fmt.Sprintf("%d\t trees of depth %d\t check: %d",
+
+			msg := fmt.Sprintf(" %8d trees of depth %-8d arenas: %-6d nodes: %-10d MB: %0.1f",
 				iterations,
 				depth,
-				acc)
-
+				arenaCount,
+				nodes,
+				float64(nodes*16)/(1<<20))
 			outBuff[index] = msg
+
+			treeArena.Free()
 			wg.Done()
 		}(depth, iterations, outCurr)
 	}
@@ -197,9 +220,12 @@ func Run(maxDepth int) {
 
 	// Compute the checksum of the long-lived binary tree that we created
 	// earlier and store its statistics.
-	msg := fmt.Sprintf("long lived tree of depth %d\t check: %d",
+	nodes := longLivedTree.Count()
+	msg := fmt.Sprintf("long lived tree of depth %-8d arenas: %-6d nodes: %-10d MB: %0.1f",
 		maxDepth,
-		longLivedTree.Count())
+		1,
+		nodes,
+		float64(nodes*16)/(1<<20))
 	outBuff[outSize-1] = msg
 
 	// Print the statistics for all of the various tree depths.
