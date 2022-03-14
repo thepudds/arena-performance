@@ -109,9 +109,7 @@ func NewTree(depth int, a *arena.Arena) *Tree {
 // Allocate an empty tree node, using an arena if provided.
 func allocTreeNode(a *arena.Arena) *Tree {
 	if a != nil {
-		var treePtr *Tree
-		a.New(&treePtr)
-		return treePtr
+		return arena.NewOf[Tree](a)
 	} else {
 		return &Tree{}
 	}
