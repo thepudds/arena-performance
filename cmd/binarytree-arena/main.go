@@ -237,9 +237,13 @@ func main() {
 		}()
 	}
 
-	n := 0
+	n := 21
 	if flag.NArg() > 0 {
-		n, _ = strconv.Atoi(flag.Arg(0))
+		var err error
+		n, err = strconv.Atoi(flag.Arg(0))
+		if err != nil {
+			log.Fatal("must specify binary tree depth as integer: ", err)
+		}
 	}
 
 	Run(n)

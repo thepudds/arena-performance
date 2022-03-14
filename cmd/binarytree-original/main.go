@@ -1,6 +1,9 @@
 // This is unmodified Go #2 binary tree (current fastest Go program) from Benchmarks Game:
 //   https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/binarytrees-go-2.html
 //
+//
+// The only change is to default to a tree depth if 21 if not specified on command line.
+//
 // License is 3-Clause BSD:
 //   https://benchmarksgame-team.pages.debian.net/benchmarksgame/license.html
 //
@@ -48,6 +51,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
 )
@@ -155,9 +159,13 @@ func Run(maxDepth int) {
 func main() {
 	flag.Parse()
 
-	n := 0
+	n := 21
 	if flag.NArg() > 0 {
-		n, _ = strconv.Atoi(flag.Arg(0))
+		var err error
+		n, err = strconv.Atoi(flag.Arg(0))
+		if err != nil {
+			log.Fatal("must specify binary tree depth as integer: ", err)
+		}
 	}
 
 	Run(n)
